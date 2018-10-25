@@ -53,6 +53,12 @@ struct profile {
 
 volatile uint32_t XRIT_count;
 volatile uint32_t YRIT_count;
+bool calib_done = false;
+
+DigitalIoPin swXmin(0, 29, DigitalIoPin::pullup, false);
+DigitalIoPin swXmax(0, 9, DigitalIoPin::pullup, false);
+DigitalIoPin swYmin(1, 3, DigitalIoPin::pullup, false);
+DigitalIoPin swYmax(0, 0, DigitalIoPin::pullup, false);
 
 xSemaphoreHandle sbRIT = xSemaphoreCreateBinary();
 xSemaphoreHandle limXmax_sem = xSemaphoreCreateBinary();
@@ -61,9 +67,8 @@ xSemaphoreHandle limYmax_sem = xSemaphoreCreateBinary();
 xSemaphoreHandle limYmin_sem = xSemaphoreCreateBinary();
 xSemaphoreHandle calib_donesem = xSemaphoreCreateBinary();
 xSemaphoreHandle inten_donesem = xSemaphoreCreateBinary();
-//xSemaphoreHandle ok_sentsem = xSemaphoreCreateBinary();
+
 QueueHandle_t xQueue;
-QueueHandle_t xQueue_servo;
 
 static void prvSetupHardware(void);
 void RIT_start(int xcount, int ycount, int us);
@@ -71,16 +76,15 @@ void SetupInt(int port, int pin, int index);
 void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight);
 static void vTask1(void *pvParameters);
 static void vTask2(void *pvParameters);
-static void vTask4(void *pvParameters);
+
 
 
 
 
 int main(void)
 {
-	xQueue = xQueueCreate(1, sizeof(profile));
-	xQueue_servo = xQueueCreate(1, sizeof(profile));
-	if(xQueue != NULL && xQueue_servo != NULL) {
+	xQueue = xQueueCreate(4, sizeof(profile));
+	if(xQueue != NULL) {
 		prvSetupHardware();
 		xTaskCreate(vTask1, "serial",
 				configMINIMAL_STACK_SIZE + 450, NULL, (tskIDLE_PRIORITY + 1UL),
@@ -90,9 +94,6 @@ int main(void)
 				configMINIMAL_STACK_SIZE + 300, NULL, (tskIDLE_PRIORITY + 1UL),
 				(TaskHandle_t *) NULL);
 
-		xTaskCreate(vTask4, "servo",
-				configMINIMAL_STACK_SIZE, NULL, (tskIDLE_PRIORITY + 1UL),
-				(TaskHandle_t *) NULL);
 		xTaskCreate(cdc_task, "CDC",
 				configMINIMAL_STACK_SIZE + 150, NULL, (tskIDLE_PRIORITY + 1UL),
 				(TaskHandle_t *) NULL);
@@ -113,9 +114,9 @@ static void vTask1(void *pvParameters) {		//serial
 	profile plotter;
 	plotter.motorX_dir = 0;
 	plotter.motorY_dir = 0;
-	plotter.penDown = 80;
-	plotter.penUp = 120;
-	plotter.penPos = 100;
+	plotter.penDown = 180;
+	plotter.penUp = 0;
+	plotter.penPos = 0;
 	plotter.speed = 50;
 	plotter.height = 310;
 	plotter.width = 380;
@@ -123,7 +124,21 @@ static void vTask1(void *pvParameters) {		//serial
 	plotter.Y = 0.0;
 	plotter.A = 0;
 
-	bool flow = true;
+	uint32_t  ticks, penup, pendown;
+	/* Initialize the SCT as PWM and set frequency */
+	Chip_SCTPWM_Init(LPC_SCT0);
+	Chip_SCTPWM_SetRate(LPC_SCT0, 50);					//50 Hz
+	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_SWM);		// Enable SWM clock before altering SWM
+
+	Chip_SWM_MovablePinAssign(SWM_SCT0_OUT1_O, 10);		//Set PIO0_10 as PWM out
+	Chip_Clock_DisablePeriphClock(SYSCTL_CLOCK_SWM);
+	Chip_SCTPWM_SetOutPin(LPC_SCT0, 1, 1);				//index: 1, pinout: 1
+	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, Chip_SCTPWM_PercentageToTicks(LPC_SCT0, 8));					//start at 8% duty cycle
+	Chip_SCTPWM_Start(LPC_SCT0);
+
+	penup = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*10/100;
+	pendown = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*5/100;
+	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, penup);
 	while(xSemaphoreTake(calib_donesem, 0) != pdTRUE) {				//wait until calibration is done
 	}
 
@@ -176,8 +191,11 @@ static void vTask1(void *pvParameters) {		//serial
 					num += (str[pos] - '0') * pow(10, j - pos - 1);
 				}
 				plotter.penPos = num;
+
+				ticks = plotter.penPos*(penup - pendown)/248 + pendown;
+				Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, ticks);
+
 				USB_send((uint8_t*) OK_reply, 4);
-				xQueueSend(xQueue_servo, &plotter, 0);
 				str = "";
 			}
 			if((pos = str.find("M5 A")) != -1) {					//task 3
@@ -262,82 +280,52 @@ static void vTask1(void *pvParameters) {		//serial
 			}
 
 		}
-
-
-
-
-		if(xSemaphoreTake(limXmin_sem, 0) == pdPASS) {			//take sem when lim is reached
-			plotter.limXmin = false;
-			flow = false;
-		}
-		if(xSemaphoreTake(limXmax_sem, 0) == pdPASS) {			//take sem when lim is reached
-			plotter.limXmax = false;
-			flow = false;
-		}
-		if(xSemaphoreTake(limYmin_sem, 0) == pdPASS) {			//take sem when lim is reached
-			plotter.limYmin = false;
-			flow = false;
-		}
-		if(xSemaphoreTake(limYmax_sem, 0) == pdPASS) {			//take sem when lim is reached
-			plotter.limYmax = false;
-			flow = false;
-		}
-
 	}
 }
 
 
 static void vTask2(void *pvParameters) {					//motors
-	DigitalIoPin YSTEP(0, 27, DigitalIoPin::output, false);
 	DigitalIoPin YDIR(0, 28, DigitalIoPin::output, false);
-	DigitalIoPin XSTEP(0, 24, DigitalIoPin::output, false);
 	DigitalIoPin XDIR(1, 0, DigitalIoPin::output, false);
+
 	int Xpulse_count = 0, Ypulse_count = 0, Xcurrent_pulse = 0, Ycurrent_pulse = 0;
 	double XpulseOverwidth, YpulseOverheight;
 	profile plotter2;
 
-
 	XDIR.write(RIGHT);
-	while(xSemaphoreTake(limXmin_sem, 0) == pdFALSE) {		//go to X = 0
+	while(swXmin.read() == true) {		//go to X = 0
 		RIT_start(10, 0, 200);
 	}
 
 	YDIR.write(RIGHT);
-	while(xSemaphoreTake(limYmin_sem, 0) == pdFALSE) {		//go to Y = 0
-
+	while(swYmin.read() == true) {		//go to Y = 0
 		RIT_start(0, 10, 200);
 	}
 
-//	XDIR.write(LEFT);
-//	while(xSemaphoreTake(limXmax_sem, 0) == pdFALSE) {		//go to X = max
-//		Xpulse_count++;
-//		RIT_start(16, 0, 200);
-//	}
-//
-//	YDIR.write(LEFT);
-//	while(xSemaphoreTake(limYmax_sem, 0) == pdFALSE) {		//go to Y  = max
-//		Ypulse_count++;
-//		RIT_start(0, 16, 200);
-//	}
+	XDIR.write(LEFT);
+	while(swXmax.read() == true) {		//go to X = max
+		Xpulse_count++;
+		RIT_start(16, 0, 200);
+	}
 
+	YDIR.write(LEFT);
+	while(swYmax.read() == true) {		//go to Y  = max
+		Ypulse_count++;
+		RIT_start(0, 16, 200);
+	}
 
-
-//	Xpulse_count = Xpulse_count*8;
-//	Ypulse_count = Ypulse_count*8;
-	Xpulse_count = 27000;
-	Ypulse_count = 30000;
+	Xpulse_count = Xpulse_count*8;
+	Ypulse_count = Ypulse_count*8;
 	Xcurrent_pulse = Xpulse_count/2;
 	Ycurrent_pulse = Ypulse_count/2;
 	XpulseOverwidth = (double) Xpulse_count/340;
 	YpulseOverheight = (double) Ypulse_count/310;
 
-	XDIR.write(LEFT);
-	YDIR.write(LEFT);
-	vTaskDelay(1000);
+	XDIR.write(RIGHT);
+	YDIR.write(RIGHT);
+	RIT_start(Xcurrent_pulse, Ycurrent_pulse, 200);
 
-	RIT_start(0, Ycurrent_pulse*2, 500);
-	vTaskDelay(1000);
-	RIT_start(Xcurrent_pulse*2, 0, 500);
+	calib_done = true;
 	xSemaphoreGive(calib_donesem);							//give semaphore to task 1
 
 	while(1) {
@@ -354,71 +342,30 @@ static void vTask2(void *pvParameters) {					//motors
 
 }
 
-
-static void vTask4(void *pvParameters) {		//servo and lazer
-	profile plotter4;
-	uint32_t  ticks, penup, pendown;
-	/* Initialize the SCT as PWM and set frequency */
-	Chip_SCTPWM_Init(LPC_SCT0);
-	Chip_SCTPWM_SetRate(LPC_SCT0, 50);					//50 Hz
-	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_SWM);		// Enable SWM clock before altering SWM
-
-	Chip_SWM_MovablePinAssign(SWM_SCT0_OUT1_O, 10);		//Set PIO0_10 as PWM out
-	Chip_Clock_DisablePeriphClock(SYSCTL_CLOCK_SWM);
-	Chip_SCTPWM_SetOutPin(LPC_SCT0, 1, 1);				//index: 1, pinout: 1
-	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, Chip_SCTPWM_PercentageToTicks(LPC_SCT0, 8));					//start at 8% duty cycle
-	Chip_SCTPWM_Start(LPC_SCT0);
-
-	penup = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*10/100;
-	pendown = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*5/100;
-
-	while(1) {
-		if(xQueueReceive(xQueue_servo, &plotter4, 10) == pdTRUE) {
-			ticks = plotter4.penPos*(penup - pendown)/248 + pendown;
-			Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, ticks);
-
-
-		}
-		vTaskDelay(configTICK_RATE_HZ/50);
+void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
+	int Xpulse, Ypulse, Xpulse_relative, Ypulse_relative;
+	Xpulse = (int) round(x*pulseOnwidth);
+	Ypulse = (int) round(y*pulseOnheight);
+	if(Xpulse >= xcurrent_pulse) {
+		xdir.write(LEFT);
+		Xpulse_relative = Xpulse - xcurrent_pulse;
 	}
-}
+	else {
+		xdir.write(RIGHT);
+		Xpulse_relative = xcurrent_pulse - Xpulse;
+	}
 
-static void prvSetupHardware(void)
-{
-	SystemCoreClockUpdate();
-	Board_Init();
-	// initialize RIT (= enable clocking etc.)
-	Chip_RIT_Init(LPC_RITIMER);
-	// set the priority level of the interrupt
-	// The level must be equal or lower than the maximum priority specified in FreeRTOS config
-	// Note that in a Cortex-M3 a higher number indicates lower interrupt priority
-	NVIC_SetPriority( RITIMER_IRQn, 5 );
-
-	/* Initialize PININT driver */
-	Chip_PININT_Init(LPC_GPIO_PIN_INT);
-	/* Enable PININT clock */
-	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_PININT);
-
-	/* Reset the PININT block */
-	Chip_SYSCTL_PeriphReset(RESET_PININT);
-
-	SetupInt(0, 29, 0);			//Xmin
-	SetupInt(0, 9, 1);			//Xmax
-	SetupInt(1, 3, 2);			//Ymin
-	SetupInt(0, 0, 3);			//Ymax
-
-	/* Enable interrupt in the NVIC */
-	NVIC_ClearPendingIRQ(PIN_INT0_IRQn);	//Xmin
-	NVIC_EnableIRQ(PIN_INT0_IRQn);
-
-	NVIC_ClearPendingIRQ(PIN_INT1_IRQn);	//Xmax
-	NVIC_EnableIRQ(PIN_INT1_IRQn);
-
-	NVIC_ClearPendingIRQ(PIN_INT2_IRQn);	//Ymin
-	NVIC_EnableIRQ(PIN_INT2_IRQn);
-
-	NVIC_ClearPendingIRQ(PIN_INT3_IRQn);	//Ymax
-	NVIC_EnableIRQ(PIN_INT3_IRQn);
+	if(Ypulse >= ycurrent_pulse) {
+		ydir.write(LEFT);
+		Ypulse_relative = Ypulse - ycurrent_pulse;
+	}
+	else {
+		ydir.write(RIGHT);
+		Ypulse_relative = ycurrent_pulse - Ypulse;
+	}
+	RIT_start(Xpulse_relative, Ypulse_relative, 200);
+	xcurrent_pulse = Xpulse;
+	ycurrent_pulse = Ypulse;
 }
 
 void RIT_start(int xcount, int ycount, int us)
@@ -450,56 +397,17 @@ void RIT_start(int xcount, int ycount, int us)
 	}
 }
 
-void SetupInt(int port, int pin, int index) {
-
-
-	/* Set pin back to GPIO (on some boards may have been changed to something
-		   else by Board_Init()) */
-	Chip_IOCON_PinMuxSet(LPC_IOCON, port, pin,
-			(IOCON_DIGMODE_EN | IOCON_MODE_PULLUP) );					//cu: IOCON_MODE_INACT
-
-	/* Configure GPIO pin as input */
-	Chip_GPIO_SetPinDIRInput(LPC_GPIO, port, pin);
-
-	/* Configure interrupt channel for the GPIO pin in INMUX block */
-	Chip_INMUX_PinIntSel(index, port, pin);
-
-	/* Configure channel interrupt as edge sensitive and falling edge interrupt */
-	Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(index));
-	Chip_PININT_SetPinModeEdge(LPC_GPIO_PIN_INT, PININTCH(index));
-	Chip_PININT_EnableIntLow(LPC_GPIO_PIN_INT, PININTCH(index));
-
+static void prvSetupHardware(void)
+{
+	SystemCoreClockUpdate();
+	Board_Init();
+	// initialize RIT (= enable clocking etc.)
+	Chip_RIT_Init(LPC_RITIMER);
+	// set the priority level of the interrupt
+	// The level must be equal or lower than the maximum priority specified in FreeRTOS config
+	// Note that in a Cortex-M3 a higher number indicates lower interrupt priority
+	NVIC_SetPriority( RITIMER_IRQn, 5 );
 }
-
-void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
-	int Xpulse, Ypulse, Xpulse_relative, Ypulse_relative;
-	Xpulse = (int) round(x*pulseOnwidth);
-	Ypulse = (int) round(y*pulseOnheight);
-	if(Xpulse >= xcurrent_pulse) {
-		xdir.write(LEFT);
-		Xpulse_relative = Xpulse - xcurrent_pulse;
-	}
-	else {
-		xdir.write(RIGHT);
-		Xpulse_relative = xcurrent_pulse - Xpulse;
-	}
-
-	if(Ypulse >= ycurrent_pulse) {
-		ydir.write(LEFT);
-		Ypulse_relative = Ypulse - ycurrent_pulse;
-	}
-	else {
-		ydir.write(RIGHT);
-		Ypulse_relative = ycurrent_pulse - Ypulse;
-	}
-	RIT_start(Xpulse_relative, 0, 500);
-	RIT_start(0, Ypulse_relative, 500);
-	xcurrent_pulse = Xpulse;
-	ycurrent_pulse = Ypulse;
-}
-
-
-
 
 
 /* the following is required if runtime statistics are to be collected */
@@ -511,68 +419,33 @@ void vConfigureTimerForRunTimeStats( void ) {
 	LPC_SCTSMALL1->CTRL_U = SCT_CTRL_PRE_L(255) | SCT_CTRL_CLRCTR_L; // set prescaler to 256 (255 + 1), and start timer
 }
 
-void PIN_INT0_IRQHandler(void)			//Xmin limit
-{
-	portBASE_TYPE xHigherPriorityWoken = pdFALSE;
-	Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(0));
-	XRIT_count = 0;
-	if(xSemaphoreGiveFromISR(limXmin_sem, &xHigherPriorityWoken) == pdTRUE) {
-		//do sth to notify
-	}
-	Board_LED_Toggle(0);
-}
-
-void PIN_INT1_IRQHandler(void)			//Xmax limit
-{
-	portBASE_TYPE xHigherPriorityWoken = pdFALSE;
-	Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(1));
-	XRIT_count = 0;
-	if(xSemaphoreGiveFromISR(limXmax_sem, &xHigherPriorityWoken) == pdTRUE) {
-		//do sth to notify
-	}
-	Board_LED_Toggle(1);
-}
-
-void PIN_INT2_IRQHandler(void)			//Ymin limit
-{
-	portBASE_TYPE xHigherPriorityWoken = pdFALSE;
-	Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(2));
-	YRIT_count = 0;
-	if(xSemaphoreGiveFromISR(limYmin_sem, &xHigherPriorityWoken) == pdTRUE) {
-		//do sth to notify
-	}
-	Board_LED_Toggle(2);
-}
-
-void PIN_INT3_IRQHandler(void)			//Ymax limit
-{
-	portBASE_TYPE xHigherPriorityWoken = pdFALSE;
-	Chip_PININT_ClearIntStatus(LPC_GPIO_PIN_INT, PININTCH(3));
-	YRIT_count = 0;
-	if(xSemaphoreGiveFromISR(limYmax_sem, &xHigherPriorityWoken) == pdTRUE) {
-		//do sth to notify
-	}
-	Board_LED_Toggle(2);
-}
-
 void RIT_IRQHandler(void)
 {
-	DigitalIoPin XSTEP(0, 24, DigitalIoPin::output, false);
-	DigitalIoPin YSTEP(0, 27, DigitalIoPin::output, false);
+	static bool decrementX = false;
+	static bool decrementY = false;
+	static DigitalIoPin XSTEP(0, 24, DigitalIoPin::output, false);
+	static DigitalIoPin YSTEP(0, 27, DigitalIoPin::output, false);
 	// This used to check if a context switch is required
 	portBASE_TYPE xHigherPriorityWoken = pdFALSE;
 	// Tell timer that we have processed the interrupt.
 	// Timer then removes the IRQ until next match occurs
 	Chip_RIT_ClearIntStatus(LPC_RITIMER); // clear IRQ flag
-	if(XRIT_count > 0) {
-		XRIT_count--;
-		XSTEP.write((XRIT_count % 2) == 1);
+	if(calib_done == false || (swXmin.read() && swXmax.read() && swYmin.read() && swYmax.read())) {
+		if(XRIT_count > 0) {
+			if(decrementX == true)
+				XRIT_count--;
+			decrementX = !decrementX;
+			XSTEP.write((XRIT_count % 2) == 1);
+		}
+		if(YRIT_count > 0) {
+			if(decrementY == true)
+				YRIT_count--;
+			decrementY = !decrementY;
+			YSTEP.write((YRIT_count % 2) == 1);
+		}
 	}
-	if(YRIT_count > 0) {
-		YRIT_count--;
-		YSTEP.write((YRIT_count % 2) == 1);
-	}
-	if(XRIT_count == 0 && YRIT_count == 0) {
+
+	if((XRIT_count == 0) && (YRIT_count == 0)) {
 		Chip_RIT_Disable(LPC_RITIMER); // disable timer
 		// Give semaphore and set context switch flag if a higher priority task was woken up
 		xSemaphoreGiveFromISR(sbRIT, &xHigherPriorityWoken);
