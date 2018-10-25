@@ -1,0 +1,23 @@
+GcodeParser/.vs/GcodeParser/v15/ipch/cc23200f747b54d3.ipch
+GcodeParser/.vs/GcodeParser/v15/ipch/5880db346aa15ff.ipch
+GcodeParser/.vs/GcodeParser/v15/Browse.VC.opendb
+GcodeParser/.vs/GcodeParser/v15/Browse.VC.db
+/.metadata/
+mDraw/
+lpc_chip_15xx/.cproject
+lpc_board_nxp_lpcxpresso_1549/.cproject
+XYPlotterLPC1549/Debug/
+XYPlotterLPC1549/XYPlotterLPC1549 LinkServer Debug.launch
+FreeRTOS/Debug/
+mDraw old/mSpider.hex
+mDraw old/mScara.hex
+mDraw old/mEggBot.hex
+mDraw old/mCar.hex
+mDraw old/avrdude.conf
+mDraw old/XY.hex
+mDraw old/Readme.txt
+GcodeParser/.metadata/
+GcodeParser/GcodeParser/Debug/
+usb_cdc/Debug/
+lpc_chip_15xx/version.txt
+XYPlotterLPC1549/XYPlotterLPC1549 LinkServer Release.launch
