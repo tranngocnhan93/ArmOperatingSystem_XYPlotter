@@ -107,8 +107,7 @@ static void vTask1(void *pvParameters) {		//serial
 	char command[26] = {0};
 	unsigned char reply[60];
 	const unsigned char OK_reply[] = "OK\r\n";
-	int i = 0, j, pos, num = 0, cmd_len;
-	uint8_t c;
+	int j, pos, num = 0, cmd_len;
 	double coordinate;
 	std::string str;
 	profile plotter;
@@ -133,12 +132,12 @@ static void vTask1(void *pvParameters) {		//serial
 	Chip_SWM_MovablePinAssign(SWM_SCT0_OUT1_O, 10);		//Set PIO0_10 as PWM out
 	Chip_Clock_DisablePeriphClock(SYSCTL_CLOCK_SWM);
 	Chip_SCTPWM_SetOutPin(LPC_SCT0, 1, 1);				//index: 1, pinout: 1
-	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, Chip_SCTPWM_PercentageToTicks(LPC_SCT0, 8));					//start at 8% duty cycle
+
+	penup = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*1.5/20;
+//	pendown = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*8/100;
+	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, penup);
 	Chip_SCTPWM_Start(LPC_SCT0);
 
-	penup = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*10/100;
-	pendown = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*5/100;
-	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, penup);
 	while(xSemaphoreTake(calib_donesem, 0) != pdTRUE) {				//wait until calibration is done
 	}
 
@@ -182,7 +181,7 @@ static void vTask1(void *pvParameters) {		//serial
 				USB_send((uint8_t*) OK_reply, 4);
 				str = "";
 			}
-			if((pos = str.find("M1 ")) != -1) {						//task 4
+			if((pos = str.find("M1 ")) != -1) {						//servo pen position
 				pos += 3;											//first digit after "M1 "
 				for(j = pos; str[j] >= '0' && str[j] <= '9'; j++) {
 				}
@@ -192,7 +191,7 @@ static void vTask1(void *pvParameters) {		//serial
 				}
 				plotter.penPos = num;
 
-				ticks = plotter.penPos*(penup - pendown)/248 + pendown;
+				ticks = plotter.penPos*(pendown - penup)/248 + penup;
 				Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, ticks);
 
 				USB_send((uint8_t*) OK_reply, 4);
@@ -276,7 +275,7 @@ static void vTask1(void *pvParameters) {		//serial
 				plotter.A = (bool) num;
 				str = "";
 				USB_send((uint8_t*) OK_reply, 4);
-				xQueueSend(xQueue, &plotter, 0);
+				xQueueSend(xQueue, &plotter, portMAX_DELAY);
 			}
 
 		}
@@ -291,33 +290,31 @@ static void vTask2(void *pvParameters) {					//motors
 	int Xpulse_count = 0, Ypulse_count = 0, Xcurrent_pulse = 0, Ycurrent_pulse = 0;
 	double XpulseOverwidth, YpulseOverheight;
 	profile plotter2;
-
+while(1);
 	XDIR.write(RIGHT);
-	while(swXmin.read() == true) {		//go to X = 0
-		RIT_start(10, 0, 200);
+	while(swXmin.read()) {		//go to X = 0
+		RIT_start(10, 0, 100);
 	}
 
 	YDIR.write(RIGHT);
-	while(swYmin.read() == true) {		//go to Y = 0
-		RIT_start(0, 10, 200);
+	while(swYmin.read()) {		//go to Y = 0
+		RIT_start(0, 10, 100);
 	}
 
 	XDIR.write(LEFT);
-	while(swXmax.read() == true) {		//go to X = max
+	while(swXmax.read()) {		//go to X = max
 		Xpulse_count++;
-		RIT_start(16, 0, 200);
+		RIT_start(1, 0, 100);
 	}
 
 	YDIR.write(LEFT);
-	while(swYmax.read() == true) {		//go to Y  = max
+	while(swYmax.read()) {		//go to Y  = max
 		Ypulse_count++;
-		RIT_start(0, 16, 200);
+		RIT_start(0, 1, 100);
 	}
 
-	Xpulse_count = Xpulse_count*8;
-	Ypulse_count = Ypulse_count*8;
-	Xcurrent_pulse = Xpulse_count/2;
-	Ycurrent_pulse = Ypulse_count/2;
+	Xcurrent_pulse = Xpulse_count/2;				//27216
+	Ycurrent_pulse = Ypulse_count/2;				//30188
 	XpulseOverwidth = (double) Xpulse_count/340;
 	YpulseOverheight = (double) Ypulse_count/310;
 
@@ -423,6 +420,7 @@ void RIT_IRQHandler(void)
 {
 	static bool decrementX = false;
 	static bool decrementY = false;
+	static bool Xstate = true, Ystate = true;
 	static DigitalIoPin XSTEP(0, 24, DigitalIoPin::output, false);
 	static DigitalIoPin YSTEP(0, 27, DigitalIoPin::output, false);
 	// This used to check if a context switch is required
@@ -432,16 +430,20 @@ void RIT_IRQHandler(void)
 	Chip_RIT_ClearIntStatus(LPC_RITIMER); // clear IRQ flag
 	if(calib_done == false || (swXmin.read() && swXmax.read() && swYmin.read() && swYmax.read())) {
 		if(XRIT_count > 0) {
-			if(decrementX == true)
+			XSTEP.write(Xstate);
+			if(decrementX == true) {
 				XRIT_count--;
+			}
 			decrementX = !decrementX;
-			XSTEP.write((XRIT_count % 2) == 1);
+			Xstate = !Xstate;
 		}
 		if(YRIT_count > 0) {
-			if(decrementY == true)
+			YSTEP.write(Ystate);
+			if(decrementY == true) {
 				YRIT_count--;
+			}
 			decrementY = !decrementY;
-			YSTEP.write((YRIT_count % 2) == 1);
+			Ystate = !Ystate;
 		}
 	}
 
@@ -453,6 +455,7 @@ void RIT_IRQHandler(void)
 	// End the ISR and (possibly) do a context switch
 	portEND_SWITCHING_ISR(xHigherPriorityWoken);
 }
+
 
 }
 
