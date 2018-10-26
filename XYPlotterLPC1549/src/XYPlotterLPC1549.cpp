@@ -108,7 +108,7 @@ static void vTask1(void *pvParameters) {		//serial
 	char command[26] = {0};
 	unsigned char reply[60];
 	const unsigned char OK_reply[] = "OK\r\n";
-	int j, pos, num = 0, cmd_len;
+	int j, pos, num = 0, cmd_len, temp;
 	double coordinate;
 	std::string str;
 	profile plotter;
@@ -292,25 +292,25 @@ static void vTask2(void *pvParameters) {					//motors
 
 	XDIR.write(RIGHT);
 	while(swXmin.read()) {		//go to X = 0
-		RIT_start(10, 0, 100);
+		RIT_start(10, 0, 200);
 	}
 
 	YDIR.write(RIGHT);
 	while(swYmin.read()) {		//go to Y = 0
-		RIT_start(0, 10, 100);
+		RIT_start(0, 10, 200);
 	}
 
 #if CALIB
 	XDIR.write(LEFT);
 	while(swXmax.read()) {		//go to X = max
 		Xpulse_count++;
-		RIT_start(1, 0, 100);
+		RIT_start(1, 0, 200);
 	}
 
 	YDIR.write(LEFT);
 	while(swYmax.read()) {		//go to Y  = max
 		Ypulse_count++;
-		RIT_start(0, 1, 100);
+		RIT_start(0, 1, 200);
 	}
 	XDIR.write(RIGHT);
 	YDIR.write(RIGHT);
