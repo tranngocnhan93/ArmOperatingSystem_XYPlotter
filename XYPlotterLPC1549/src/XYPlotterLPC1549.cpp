@@ -32,6 +32,7 @@
 
 #define LEFT true			//counter clockwise
 #define RIGHT false			//clockwise
+#define CALIB 0
 
 struct profile {
 	bool motorX_dir;		//0: clockwidse, 1: counter-clockwise
@@ -123,21 +124,6 @@ static void vTask1(void *pvParameters) {		//serial
 	plotter.Y = 0.0;
 	plotter.A = 0;
 
-	uint32_t  ticks, penup, pendown;
-	/* Initialize the SCT as PWM and set frequency */
-	Chip_SCTPWM_Init(LPC_SCT0);
-	Chip_SCTPWM_SetRate(LPC_SCT0, 50);					//50 Hz
-	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_SWM);		// Enable SWM clock before altering SWM
-
-	Chip_SWM_MovablePinAssign(SWM_SCT0_OUT1_O, 10);		//Set PIO0_10 as PWM out
-	Chip_Clock_DisablePeriphClock(SYSCTL_CLOCK_SWM);
-	Chip_SCTPWM_SetOutPin(LPC_SCT0, 1, 1);				//index: 1, pinout: 1
-
-	penup = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*1.5/20;
-//	pendown = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*8/100;
-	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, penup);
-	Chip_SCTPWM_Start(LPC_SCT0);
-
 	while(xSemaphoreTake(calib_donesem, 0) != pdTRUE) {				//wait until calibration is done
 	}
 
@@ -155,13 +141,13 @@ static void vTask1(void *pvParameters) {		//serial
 				USB_send(reply, strlen((char*) reply));
 				str = "";
 			}
-			if((pos = str.find("M11")) != -1) {
+			else if((pos = str.find("M11")) != -1) {
 				snprintf((char*)reply, 60, "M11 %d %d %d %d\r\nOK\r\n",
 						plotter.limXmin, plotter.limXmax, plotter.limYmin, plotter.limYmax);
 				USB_send(reply, strlen((char*) reply));
 				str = "";
 			}
-			if((pos = str.find("M2 U")) != -1) {					//send to task 4
+			else if((pos = str.find("M2 U")) != -1) {					//send to task 4
 				pos += 4;											//first digit after "M2 U"
 				for(j = pos; str[j] >= '0' && str[j] <= '9'; j++) {
 				}
@@ -181,7 +167,7 @@ static void vTask1(void *pvParameters) {		//serial
 				USB_send((uint8_t*) OK_reply, 4);
 				str = "";
 			}
-			if((pos = str.find("M1 ")) != -1) {						//servo pen position
+			else if((pos = str.find("M1 ")) != -1) {						//servo pen position
 				pos += 3;											//first digit after "M1 "
 				for(j = pos; str[j] >= '0' && str[j] <= '9'; j++) {
 				}
@@ -191,13 +177,10 @@ static void vTask1(void *pvParameters) {		//serial
 				}
 				plotter.penPos = num;
 
-				ticks = plotter.penPos*(pendown - penup)/248 + penup;
-				Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, ticks);
-
 				USB_send((uint8_t*) OK_reply, 4);
 				str = "";
 			}
-			if((pos = str.find("M5 A")) != -1) {					//task 3
+			else if((pos = str.find("M5 A")) != -1) {					//task 3
 				pos += 4;											//first digit after "M5 A"
 				num = str[pos] - '0';
 				plotter.motorX_dir = (bool) num;
@@ -235,13 +218,13 @@ static void vTask1(void *pvParameters) {		//serial
 				xQueueSend(xQueue, &plotter, 0);
 
 			}
-			if((pos = str.find("G28")) != -1) {								//task 3
+			else if((pos = str.find("G28")) != -1) {								//task 3
 				plotter.X = 0.0;
 				plotter.Y = 0.0;
 				str = "";
 				xQueueSend(xQueue, &plotter, 0);
 			}
-			if((pos = str.find("G1 X")) != -1) {							//task 3
+			else if((pos = str.find("G1 X")) != -1) {							//task 3
 				pos += 4;						//first digit after "M2 U"
 				for(j = pos; str[j] >= '0' && str[j] <= '9'; j++) {			//get final digit pos of xx. part
 				}
@@ -290,7 +273,23 @@ static void vTask2(void *pvParameters) {					//motors
 	int Xpulse_count = 0, Ypulse_count = 0, Xcurrent_pulse = 0, Ycurrent_pulse = 0;
 	double XpulseOverwidth, YpulseOverheight;
 	profile plotter2;
-while(1);
+
+	int current_pos;
+	uint32_t  ticks, penup, pendown;
+	/* Initialize the SCT as PWM and set frequency */
+	Chip_SCTPWM_Init(LPC_SCT0);
+	Chip_SCTPWM_SetRate(LPC_SCT0, 50);					//50 Hz
+	Chip_Clock_EnablePeriphClock(SYSCTL_CLOCK_SWM);		// Enable SWM clock before altering SWM
+
+	Chip_SWM_MovablePinAssign(SWM_SCT0_OUT1_O, 10);		//Set PIO0_10 as PWM out
+	Chip_Clock_DisablePeriphClock(SYSCTL_CLOCK_SWM);
+	Chip_SCTPWM_SetOutPin(LPC_SCT0, 1, 1);				//index: 1, pinout: 1
+
+	penup = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*5/100;
+	pendown = Chip_SCTPWM_GetTicksPerCycle(LPC_SCT0)*8/100;
+	Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, penup);
+	Chip_SCTPWM_Start(LPC_SCT0);
+
 	XDIR.write(RIGHT);
 	while(swXmin.read()) {		//go to X = 0
 		RIT_start(10, 0, 100);
@@ -301,6 +300,7 @@ while(1);
 		RIT_start(0, 10, 100);
 	}
 
+#if CALIB
 	XDIR.write(LEFT);
 	while(swXmax.read()) {		//go to X = max
 		Xpulse_count++;
@@ -312,31 +312,37 @@ while(1);
 		Ypulse_count++;
 		RIT_start(0, 1, 100);
 	}
+	XDIR.write(RIGHT);
+	YDIR.write(RIGHT);
+#endif
+#if !CALIB
+	Xpulse_count = 27218;		//27216	27218
+	Ypulse_count = 30190;		//30188 30190
+	XDIR.write(LEFT);
+	YDIR.write(LEFT);
+#endif
 
-	Xcurrent_pulse = Xpulse_count/2;				//27216
-	Ycurrent_pulse = Ypulse_count/2;				//30188
+	Xcurrent_pulse = Xpulse_count/2;
+	Ycurrent_pulse = Ypulse_count/2;
 	XpulseOverwidth = (double) Xpulse_count/340;
 	YpulseOverheight = (double) Ypulse_count/310;
 
-	XDIR.write(RIGHT);
-	YDIR.write(RIGHT);
 	RIT_start(Xcurrent_pulse, Ycurrent_pulse, 200);
 
 	calib_done = true;
-	xSemaphoreGive(calib_donesem);							//give semaphore to task 1
+	xSemaphoreGive(calib_donesem);								//give semaphore to task 1
 
 	while(1) {
 		if(xQueueReceive(xQueue, &plotter2, 10) == pdTRUE) {
+			if(plotter2.penPos != current_pos) {				//only move servo when needed
+				ticks = plotter2.penPos*(pendown - penup)/248 + penup;
+				Chip_SCTPWM_SetDutyCycle(LPC_SCT0, 1, ticks);
+				vTaskDelay(configTICK_RATE_HZ/5);				//wait for servo to drive to desired position
+			}
 			GotoPos(XDIR, YDIR, Xcurrent_pulse, Ycurrent_pulse, plotter2.X, plotter2.Y, XpulseOverwidth, YpulseOverheight);
-
-
+			current_pos = plotter2.penPos;
 		}
-
-		//vTaskDelay(configTICK_RATE_HZ/50);
-
-
 	}
-
 }
 
 void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
