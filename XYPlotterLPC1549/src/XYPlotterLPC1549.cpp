@@ -108,7 +108,7 @@ static void vTask1(void *pvParameters) {		//serial
 	char command[26] = {0};
 	unsigned char reply[60];
 	const unsigned char OK_reply[] = "OK\r\n";
-	int j, pos, num = 0, cmd_len, temp;
+	int j, pos, num = 0, cmd_len;
 	double coordinate;
 	std::string str;
 	profile plotter;
@@ -135,7 +135,7 @@ static void vTask1(void *pvParameters) {		//serial
 			str[str.length()-1] = '\0';
 
 			if((pos = str.find("M10")) != -1) {
-				snprintf((char*) reply, 60, "M10 XY 380 310 0.00 0.00 A%d B%d H0 S%d U%d D%d\r\nOK\r\n",
+				snprintf((char*) reply, 60, "M10 XY 310 340 0.00 0.00 A%d B%d H0 S%d U%d D%d\r\nOK\r\n",
 						plotter.motorX_dir, plotter.motorY_dir, plotter.speed, plotter.penUp, plotter.penDown);
 
 				USB_send(reply, strlen((char*) reply));
@@ -324,8 +324,8 @@ static void vTask2(void *pvParameters) {					//motors
 
 	Xcurrent_pulse = Xpulse_count/2;
 	Ycurrent_pulse = Ypulse_count/2;
-	XpulseOverwidth = (double) Xpulse_count/340;
-	YpulseOverheight = (double) Ypulse_count/310;
+	XpulseOverwidth = (double) Xpulse_count/310;
+	YpulseOverheight = (double) Ypulse_count/340;
 
 	RIT_start(Xcurrent_pulse, Ycurrent_pulse, 200);
 
