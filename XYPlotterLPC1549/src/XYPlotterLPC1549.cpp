@@ -347,8 +347,10 @@ static void vTask2(void *pvParameters) {					//motors
 
 void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
 	int Xpulse, Ypulse, Xpulse_relative, Ypulse_relative;
+	int ratio, ratio_mod;
 	Xpulse = (int) round(x*pulseOnwidth);
 	Ypulse = (int) round(y*pulseOnheight);
+
 	if(Xpulse >= xcurrent_pulse) {
 		xdir.write(LEFT);
 		Xpulse_relative = Xpulse - xcurrent_pulse;
@@ -366,7 +368,32 @@ void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycu
 		ydir.write(RIGHT);
 		Ypulse_relative = ycurrent_pulse - Ypulse;
 	}
-	RIT_start(Xpulse_relative, Ypulse_relative, 200);
+
+	if(Xpulse_relative > Ypulse_relative) {
+		ratio = Xpulse_relative / Ypulse_relative;
+		ratio_mod = Xpulse_relative % Ypulse_relative;
+
+		for(; Xpulse_relative > 0; Xpulse_relative--) {
+			RIT_start(ratio, 1, 200);
+			xcurrent_pulse += ratio;
+		}
+		if(ratio_mod != 0) {
+			RIT_start(abs(Xpulse - xcurrent_pulse), 0, 200);
+		}
+	}
+	else {
+		ratio = Ypulse_relative / Xpulse_relative;
+		ratio_mod = Ypulse_relative % Xpulse_relative;
+
+		for(; Ypulse_relative; Ypulse_relative--) {
+			RIT_start(1, ratio, 200);
+			ycurrent_pulse += ratio;
+		}
+		if(ratio_mod != 0) {
+			RIT_start(0, abs(Ypulse - ycurrent_pulse), 200);
+		}
+	}
+
 	xcurrent_pulse = Xpulse;
 	ycurrent_pulse = Ypulse;
 }
