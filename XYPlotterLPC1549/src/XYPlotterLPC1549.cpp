@@ -358,13 +358,26 @@ void plotLineLow(DigitalIoPin ydir, int x0, int y0, int x1, int y1) {
 	else ydir.write(LEFT);		//increase
 	D = 2*dy - dx;
 
-	for (int x = x0; x <= x1; x++) {
-		if(D > 0) {
-			RIT_start(1, 1, 200);
-			D = D - 2*dx;
+	if(dx < 0) {
+		dx = -dx;
+		for (int x = x1; x <= x0; x++) {
+			if(D > 0) {
+				RIT_start(1, 1, 200);
+				D = D - 2*dx;
+			}
+			else RIT_start(1, 0, 200);
+			D = D + 2*dy;
 		}
-		else RIT_start(1, 0, 200);
-		D = D + 2*dy;
+	}
+	else {
+		for (int x = x0; x <= x1; x++) {
+			if(D > 0) {
+				RIT_start(1, 1, 200);
+				D = D - 2*dx;
+			}
+			else RIT_start(1, 0, 200);
+			D = D + 2*dy;
+		}
 	}
 }
 
@@ -380,13 +393,27 @@ void plotLineHigh(DigitalIoPin xdir, int x0, int y0, int x1, int y1) {
 	else xdir.write(LEFT);
 	D = 2*dx - dy;
 
-	for(int y = y0; y <= y1; y++) {
-		if(D > 0) {
-			RIT_start(1, 1, 200);
-			D = D - 2*dy;
+	if(dy < 0) {
+		dy = - dy;
+		for(int y = y1; y <= y0; y++) {
+			if(D > 0) {
+				RIT_start(1, 1, 200);
+				D = D - 2*dy;
+			}
+			else RIT_start(0, 1, 200);
+			D = D + 2*dx;
 		}
-		else RIT_start(0, 1, 200);
-		D = D + 2*dx;
+
+	}
+	else {
+		for(int y = y0; y <= y1; y++) {
+			if(D > 0) {
+				RIT_start(1, 1, 200);
+				D = D - 2*dy;
+			}
+			else RIT_start(0, 1, 200);
+			D = D + 2*dx;
+		}
 	}
 }
 #if BRESENHAM
@@ -398,27 +425,22 @@ void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycu
 	Ypulse_relative = abs(Ypulse - ycurrent_pulse);
 
 	if(Ypulse_relative < Xpulse_relative) {
-		if(xcurrent_pulse > Xpulse) {
+		if(xcurrent_pulse < Xpulse) {
 			xdir.write(LEFT);
-			plotLineLow(ydir, Xpulse, Ypulse, xcurrent_pulse, ycurrent_pulse);
 		}
 		else {
 			xdir.write(RIGHT);
-			plotLineLow(ydir, xcurrent_pulse, ycurrent_pulse, Xpulse, Ypulse);
 		}
-
+		plotLineLow(ydir, xcurrent_pulse, ycurrent_pulse, Xpulse, Ypulse);
 	}
 	else {
-		if(ycurrent_pulse > Ypulse) {
+		if(ycurrent_pulse < Ypulse) {
 			ydir.write(LEFT);
-			plotLineHigh(xdir, Xpulse, Ypulse, xcurrent_pulse, ycurrent_pulse);
 		}
-
 		else {
 			ydir.write(RIGHT);
-			plotLineHigh(xdir, xcurrent_pulse, ycurrent_pulse, Xpulse, Ypulse);
 		}
-
+		plotLineHigh(xdir, xcurrent_pulse, ycurrent_pulse, Xpulse, Ypulse);
 
 	}
 
