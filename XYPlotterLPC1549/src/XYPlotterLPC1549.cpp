@@ -33,6 +33,7 @@
 #define LEFT true			//counter clockwise
 #define RIGHT false			//clockwise
 #define CALIB 0
+#define BRESENHAM 1
 
 struct profile {
 	bool motorX_dir;		//0: clockwidse, 1: counter-clockwise
@@ -84,7 +85,7 @@ static void vTask2(void *pvParameters);
 
 int main(void)
 {
-	xQueue = xQueueCreate(4, sizeof(profile));
+	xQueue = xQueueCreate(1, sizeof(profile));
 	if(xQueue != NULL) {
 		prvSetupHardware();
 		xTaskCreate(vTask1, "serial",
@@ -316,8 +317,8 @@ static void vTask2(void *pvParameters) {					//motors
 	YDIR.write(RIGHT);
 #endif
 #if !CALIB
-	Xpulse_count = 27218;		//27216	27218
-	Ypulse_count = 30190;		//30188 30190
+	Xpulse_count = 26985;		//27216	27218 27219	plotter1: 26985
+	Ypulse_count = 30427;		//30188 30190 30181			  30427
 	XDIR.write(LEFT);
 	YDIR.write(LEFT);
 #endif
@@ -345,12 +346,92 @@ static void vTask2(void *pvParameters) {					//motors
 	}
 }
 
+void plotLineLow(DigitalIoPin ydir, int x0, int y0, int x1, int y1) {
+	int dx, dy, D;
+	dx = x1 - x0;
+	dy = y1 - y0;
+
+	if(dy < 0) {
+		ydir.write(RIGHT);		//decrease
+		dy = -dy;
+	}
+	else ydir.write(LEFT);		//increase
+	D = 2*dy - dx;
+
+	for (int x = x0; x <= x1; x++) {
+		if(D > 0) {
+			RIT_start(1, 1, 200);
+			D = D - 2*dx;
+		}
+		else RIT_start(1, 0, 200);
+		D = D + 2*dy;
+	}
+}
+
+void plotLineHigh(DigitalIoPin xdir, int x0, int y0, int x1, int y1) {
+	int dx, dy, D;
+	dx = x1 - x0;
+	dy = y1 - y0;
+
+	if(dx < 0) {
+		xdir.write(RIGHT);
+		dx = -dx;
+	}
+	else xdir.write(LEFT);
+	D = 2*dx - dy;
+
+	for(int y = y0; y <= y1; y++) {
+		if(D > 0) {
+			RIT_start(1, 1, 200);
+			D = D - 2*dy;
+		}
+		else RIT_start(0, 1, 200);
+		D = D + 2*dx;
+	}
+}
+#if BRESENHAM
 void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
 	int Xpulse, Ypulse, Xpulse_relative, Ypulse_relative;
-	int ratio, ratio_mod;
 	Xpulse = (int) round(x*pulseOnwidth);
 	Ypulse = (int) round(y*pulseOnheight);
+	Xpulse_relative = abs(Xpulse - xcurrent_pulse);
+	Ypulse_relative = abs(Ypulse - ycurrent_pulse);
 
+	if(Ypulse_relative < Xpulse_relative) {
+		if(xcurrent_pulse > Xpulse) {
+			xdir.write(LEFT);
+			plotLineLow(ydir, Xpulse, Ypulse, xcurrent_pulse, ycurrent_pulse);
+		}
+		else {
+			xdir.write(RIGHT);
+			plotLineLow(ydir, xcurrent_pulse, ycurrent_pulse, Xpulse, Ypulse);
+		}
+
+	}
+	else {
+		if(ycurrent_pulse > Ypulse) {
+			ydir.write(LEFT);
+			plotLineHigh(xdir, Xpulse, Ypulse, xcurrent_pulse, ycurrent_pulse);
+		}
+
+		else {
+			ydir.write(RIGHT);
+			plotLineHigh(xdir, xcurrent_pulse, ycurrent_pulse, Xpulse, Ypulse);
+		}
+
+
+	}
+
+	xcurrent_pulse = Xpulse;
+	ycurrent_pulse = Ypulse;
+}
+#endif
+
+#if !BRESENHAM
+void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
+	int Xpulse, Ypulse, Xpulse_relative, Ypulse_relative;
+	Xpulse = (int) round(x*pulseOnwidth);
+	Ypulse = (int) round(y*pulseOnheight);
 	if(Xpulse >= xcurrent_pulse) {
 		xdir.write(LEFT);
 		Xpulse_relative = Xpulse - xcurrent_pulse;
@@ -368,35 +449,11 @@ void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycu
 		ydir.write(RIGHT);
 		Ypulse_relative = ycurrent_pulse - Ypulse;
 	}
-
-	if(Xpulse_relative > Ypulse_relative) {
-		ratio = Xpulse_relative / Ypulse_relative;
-		ratio_mod = Xpulse_relative % Ypulse_relative;
-
-		for(; Xpulse_relative > 0; Xpulse_relative--) {
-			RIT_start(ratio, 1, 200);
-			xcurrent_pulse += ratio;
-		}
-		if(ratio_mod != 0) {
-			RIT_start(abs(Xpulse - xcurrent_pulse), 0, 200);
-		}
-	}
-	else {
-		ratio = Ypulse_relative / Xpulse_relative;
-		ratio_mod = Ypulse_relative % Xpulse_relative;
-
-		for(; Ypulse_relative; Ypulse_relative--) {
-			RIT_start(1, ratio, 200);
-			ycurrent_pulse += ratio;
-		}
-		if(ratio_mod != 0) {
-			RIT_start(0, abs(Ypulse - ycurrent_pulse), 200);
-		}
-	}
-
+	RIT_start(Xpulse_relative, Ypulse_relative, 200);
 	xcurrent_pulse = Xpulse;
 	ycurrent_pulse = Ypulse;
 }
+#endif
 
 void RIT_start(int xcount, int ycount, int us)
 {
@@ -438,7 +495,6 @@ static void prvSetupHardware(void)
 	// Note that in a Cortex-M3 a higher number indicates lower interrupt priority
 	NVIC_SetPriority( RITIMER_IRQn, 5 );
 }
-
 
 /* the following is required if runtime statistics are to be collected */
 extern "C" {
@@ -488,8 +544,6 @@ void RIT_IRQHandler(void)
 	// End the ISR and (possibly) do a context switch
 	portEND_SWITCHING_ISR(xHigherPriorityWoken);
 }
-
-
 }
 
 
@@ -503,3 +557,74 @@ void RIT_IRQHandler(void)
 
 
 
+
+
+
+
+
+
+/*
+ * void GotoPos(DigitalIoPin xdir, DigitalIoPin ydir, int &xcurrent_pulse, int &ycurrent_pulse, double x, double y, double pulseOnwidth, double pulseOnheight) {
+	int Xpulse, Ypulse, Xpulse_relative, Ypulse_relative;
+	int ratio, ratio_mod, reduce_sawtooth;
+	bool plus;
+	Xpulse = (int) round(x*pulseOnwidth);
+	Ypulse = (int) round(y*pulseOnheight);
+
+	if(Xpulse >= xcurrent_pulse) {
+		xdir.write(LEFT);
+		Xpulse_relative = Xpulse - xcurrent_pulse;
+	}
+	else {
+		xdir.write(RIGHT);
+		Xpulse_relative = xcurrent_pulse - Xpulse;
+	}
+
+	if(Ypulse >= ycurrent_pulse) {
+		ydir.write(LEFT);
+		Ypulse_relative = Ypulse - ycurrent_pulse;
+	}
+	else {
+		ydir.write(RIGHT);
+		Ypulse_relative = ycurrent_pulse - Ypulse;
+	}
+
+	if(Xpulse_relative > Ypulse_relative) {
+		ratio = Xpulse_relative / Ypulse_relative;
+		ratio_mod = Xpulse_relative % Ypulse_relative;
+		reduce_sawtooth = Ypulse_relative / ratio_mod;
+
+		for(int i = 0; i < Ypulse_relative; i++) {		//this runs Ypulse_relative times
+			if(i % reduce_sawtooth == 0) {				//this happens every reduce_sawtooth times
+				plus = true;
+			}
+			else plus = false;
+			RIT_start(ratio + plus, 1, 200);
+			xcurrent_pulse += (ratio + plus);
+		}
+		if(ratio_mod != 0) {
+			RIT_start(abs(Xpulse - xcurrent_pulse), 0, 200);
+		}
+	}
+	else {
+		ratio = Ypulse_relative / Xpulse_relative;
+		ratio_mod = Ypulse_relative % Xpulse_relative;
+		reduce_sawtooth = Xpulse_relative / ratio_mod;
+
+		for(int i = 0; i < Xpulse_relative; i++) {
+			if(i % reduce_sawtooth == 0) {
+				plus = true;
+			}
+			else plus = false;
+			RIT_start(1, ratio + plus, 200);
+			ycurrent_pulse += (ratio + plus);
+		}
+		if(ratio_mod != 0) {
+			RIT_start(0, abs(Ypulse - ycurrent_pulse), 200);
+		}
+	}
+
+	xcurrent_pulse = Xpulse;
+	ycurrent_pulse = Ypulse;
+}
+ */
