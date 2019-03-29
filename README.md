@@ -17,7 +17,8 @@ in a period of time as possible<br/>
 **SCT timer:** a powerful timer which can be utilised in a lot of applications. In this particular project, it is to generate
 PWM signal for a servo motor<br/>
 **RIT timer:** producing a PWM signals with period of microseconds to drive stepper motors<br/>
-Semaphore and mutex: task managing mechanism in order to tell the program which task allowed to execute at the time being
+Semaphore and mutex: task managing mechanism in order to tell the program which task allowed to execute at the time being<br/>
+**G code:** a coding standard to transfer informantion from image processing software to LPC board<br/>
 
 ## Demo
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/zUFKqqQhi9s/0.jpg)](https://www.youtube.com/watch?v=zUFKqqQhi9s)
@@ -26,3 +27,5 @@ Semaphore and mutex: task managing mechanism in order to tell the program which 
 **1. FreeRTOS Kernel** https://www.freertos.org/<br/>
 **2. XY Plotter Robot Kit:** https://makeblock.com/project/xy-plotter-robot-kit<br/>
 **3. LPCXpresso1549 Board:** https://www.nxp.com/support/developer-resources/evaluation-and-development-boards/lpcxpresso-boards/lpcxpresso-board-for-lpc1549:OM13056<br/>
+**4. G code:** https://en.wikipedia.org/wiki/G-code<br/>
+
