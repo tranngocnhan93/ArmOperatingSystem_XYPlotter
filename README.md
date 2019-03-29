@@ -1,4 +1,4 @@
-# ArmOperatingSystem_XYPlotter
+# Arm Operating System - XY Plotter
 ![Capture](https://user-images.githubusercontent.com/12455851/55190823-4c200300-51a9-11e9-9c39-618e30362e96.PNG)
 
 ## Arm Operating System Project
